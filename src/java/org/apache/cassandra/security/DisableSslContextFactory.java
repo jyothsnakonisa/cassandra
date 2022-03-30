@@ -37,6 +37,12 @@ public class DisableSslContextFactory extends AbstractSslContextFactory
     }
 
     @Override
+    protected KeyManagerFactory buildOutboundKeyManagerFactory() throws SSLException
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public boolean hasKeystore()
     {
         return false;
