@@ -132,6 +132,8 @@ server_encryption_options:
     internode_encryption: none
     keystore: test/conf/cassandra_ssl_test.keystore
     keystore_password: cassandra
+    outbound_keystore: test/conf/cassandra_ssl_test.keystore
+    outbound_keystore_password: cassandra
     truststore: test/conf/cassandra_ssl_test.truststore
     truststore_password: cassandra
 incremental_backups: true

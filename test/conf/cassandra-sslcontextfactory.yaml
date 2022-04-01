@@ -67,6 +67,8 @@ server_encryption_options:
     internode_encryption: none
     keystore: conf/.keystore
     keystore_password: cassandra
+    outbound_keystore: conf/.keystore
+    outbound_keystore_password: cassandra
     truststore: conf/.truststore
     truststore_password: cassandra
 incremental_backups: true
