@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import io.netty.util.concurrent.Future; //checkstyle: permit this import
 import io.netty.util.concurrent.Promise; //checkstyle: permit this import
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
-import org.apache.cassandra.utils.concurrent.ImmediateFuture;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -130,13 +130,6 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         if (logger.isTraceEnabled())
             logger.trace("creating outbound bootstrap to {}, requestVersion: {}", settings, requestMessagingVersion);
 
-        if (!settings.authenticate())
-        {
-            // interrupt other connections, so they must attempt to re-authenticate
-            MessagingService.instance().interruptOutbound(settings.to);
-            return ImmediateFuture.failure(new IOException("authentication failed to " + settings.connectToId()));
-        }
-
         // this is a bit ugly, but is the easiest way to ensure that if we timeout we can propagate a suitable error message
         // and still guarantee that, if on timing out we raced with success, the successfully created channel is handled
         AtomicBoolean timedout = new AtomicBoolean();
@@ -198,7 +191,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         {
             ChannelPipeline pipeline = channel.pipeline();
 
-            // order of handlers: ssl -> logger -> handshakeHandler
+            // order of handlers: ssl -> server-authentication -> logger -> handshakeHandler
             if (settings.withEncryption())
             {
                 // check if we should actually encrypt this connection
@@ -211,6 +204,15 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 logger.trace("creating outbound netty SslContext: context={}, engine={}", sslContext.getClass().getName(), sslHandler.engine().getClass().getName());
                 pipeline.addFirst("ssl", sslHandler);
             }
+            else
+            {
+                // If a connection is SSL based we don't need to make additional authentication when making a client
+                // connection. Trusted roots in the client's truststore would suffice for authentication.
+                //
+                // Outbound connection is a client connection we don't need to extract identity from server certificate and authenticate.
+                // Add this ServerAuthenticationHandler only when encryption is not enabled just for backward compatibility.
+                pipeline.addLast("server-authentication", new ServerAuthenticationHandler());
+            }
 
             if (WIRETRACE)
                 pipeline.addLast("logger", new LoggingHandler(LogLevel.INFO));
@@ -218,6 +220,26 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
             pipeline.addLast("handshake", new Handler());
         }
 
+    }
+
+    /**
+     * Authenticates the server when a connection is non-ssl based connection. If a connection is SSL based connection
+     * Server's identity is verified during ssl handshake using root certificate in truststore.
+     */
+    private class ServerAuthenticationHandler extends ByteToMessageDecoder
+    {
+
+        @Override
+        protected void decode(ChannelHandlerContext channelHandlerContext, ByteBuf byteBuf, List<Object> list) throws Exception
+        {
+            if (!settings.authenticator.authenticate(settings.to.getAddress(), settings.to.getPort()))
+            {
+                // interrupt other connections, so they must attempt to re-authenticate
+                MessagingService.instance().interruptOutbound(settings.to);
+                logger.error("authentication failed to " + settings.connectToId());
+                channelHandlerContext.close();
+            }
+        }
     }
 
     private class Handler extends ByteToMessageDecoder

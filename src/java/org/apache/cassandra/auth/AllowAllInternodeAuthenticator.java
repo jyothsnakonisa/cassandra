@@ -20,12 +20,18 @@
 package org.apache.cassandra.auth;
 
 import java.net.InetAddress;
+import java.security.cert.Certificate;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
 
 public class AllowAllInternodeAuthenticator implements IInternodeAuthenticator
 {
     public boolean authenticate(InetAddress remoteAddress, int remotePort)
+    {
+        return true;
+    }
+
+    public boolean authenticate(Certificate[] certificates)
     {
         return true;
     }

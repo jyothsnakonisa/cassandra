@@ -20,10 +20,13 @@ package org.apache.cassandra.net;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.security.cert.Certificate;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.concurrent.Future;
 import java.util.function.Consumer;
+
+import javax.net.ssl.SSLPeerUnverifiedException;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -46,6 +49,7 @@ import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
+import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -102,7 +106,7 @@ public class InboundConnectionInitiator
 
             pipelineInjector.accept(pipeline);
 
-            // order of handlers: ssl -> logger -> handshakeHandler
+            // order of handlers: ssl -> client-authentication -> logger -> handshakeHandler
             // For either unencrypted or transitional modes, allow Ssl optionally.
             switch(settings.encryption.tlsEncryptionPolicy())
             {
@@ -118,6 +122,9 @@ public class InboundConnectionInitiator
                     pipeline.addAfter(PIPELINE_INTERNODE_ERROR_EXCLUSIONS, "ssl", sslHandler);
                     break;
             }
+
+            // Pipeline for performing client authentication
+            pipeline.addLast("client-authentication", new ClientAuthenticationHandler(settings.authenticator));
 
             if (WIRETRACE)
                 pipeline.addLast("logger", new LoggingHandler(LogLevel.INFO));
@@ -199,6 +206,73 @@ public class InboundConnectionInitiator
     }
 
     /**
+     * Handler to perform authentication for internode inbound connections.
+     * only inbound(server connections) connections needs to authenticate internode client after SSL Handshake
+     * This handler is called even before messaging handshake starts.
+     */
+    private static class ClientAuthenticationHandler extends ByteToMessageDecoder
+    {
+        private final IInternodeAuthenticator authenticator;
+
+        public ClientAuthenticationHandler(IInternodeAuthenticator authenticator)
+        {
+            this.authenticator = authenticator;
+        }
+
+        @Override
+        protected void decode(ChannelHandlerContext channelHandlerContext, ByteBuf byteBuf, List<Object> list) throws Exception
+        {
+            final Certificate[] certificates = certificates(channelHandlerContext.channel());
+            if (!authenticate(channelHandlerContext.channel().remoteAddress(), certificates))
+            {
+                logger.error("Unable to authenticate peer {} for internode authentication", channelHandlerContext.channel());
+                channelHandlerContext.close();
+            }
+            channelHandlerContext.pipeline().remove(this);
+        }
+
+        private boolean authenticate(SocketAddress socketAddress, final Certificate[] certificates) throws IOException
+        {
+            if (socketAddress.getClass().getSimpleName().equals("EmbeddedSocketAddress"))
+                return true;
+
+            if (!(socketAddress instanceof InetSocketAddress))
+                throw new IOException(String.format("Unexpected SocketAddress type: %s, %s", socketAddress.getClass(), socketAddress));
+
+            InetSocketAddress addr = (InetSocketAddress) socketAddress;
+            if (!authenticator.authenticate(addr.getAddress(), addr.getPort(), certificates))
+            {
+                // Log at info level as anything that can reach the inbound port could hit this
+                // and trigger a log of noise.  Failed outbound connections to known cluster endpoints
+                // still fail with an ERROR message and exception to alert operators that aren't watching logs closely.
+                logger.info("Authenticate rejected inbound internode connection from {}", addr);
+                return false;
+            }
+            return true;
+        }
+
+        private Certificate[] certificates(Channel channel)
+        {
+            SslHandler sslHandler = (SslHandler) channel.pipeline().get("ssl");
+            Certificate[] certificates = null;
+            if (sslHandler != null)
+            {
+                try
+                {
+                    certificates = sslHandler.engine()
+                                             .getSession()
+                                             .getPeerCertificates();
+                }
+                catch (SSLPeerUnverifiedException e)
+                {
+                    logger.debug("Failed to get peer certificates for peer {}", channel.remoteAddress(), e);
+                }
+            }
+            return certificates;
+        }
+    }
+
+    /**
      * 'Server-side' component that negotiates the internode handshake when establishing a new connection.
      * This handler will be the first in the netty channel for each incoming connection (secure socket (TLS) notwithstanding),
      * and once the handshake is successful, it will configure the proper handlers ({@link InboundMessageHandler}
@@ -233,30 +307,6 @@ public class InboundConnectionInitiator
                 failHandshake(ctx);
             }, HandshakeProtocol.TIMEOUT_MILLIS, MILLISECONDS);
 
-            if (!authenticate(ctx.channel().remoteAddress()))
-            {
-                failHandshake(ctx);
-            }
-        }
-
-        private boolean authenticate(SocketAddress socketAddress) throws IOException
-        {
-            if (socketAddress.getClass().getSimpleName().equals("EmbeddedSocketAddress"))
-                return true;
-
-            if (!(socketAddress instanceof InetSocketAddress))
-                throw new IOException(String.format("Unexpected SocketAddress type: %s, %s", socketAddress.getClass(), socketAddress));
-
-            InetSocketAddress addr = (InetSocketAddress)socketAddress;
-            if (!settings.authenticate(addr.getAddress(), addr.getPort()))
-            {
-                // Log at info level as anything that can reach the inbound port could hit this
-                // and trigger a log of noise.  Failed outbound connections to known cluster endpoints
-                // still fail with an ERROR message and exception to alert operators that aren't watching logs closely.
-                logger.info("Authenticate rejected inbound internode connection from {}", addr);
-                return false;
-            }
-            return true;
         }
 
         @Override

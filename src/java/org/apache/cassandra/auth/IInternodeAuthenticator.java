@@ -20,6 +20,7 @@
 package org.apache.cassandra.auth;
 
 import java.net.InetAddress;
+import java.security.cert.Certificate;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
 
@@ -36,9 +37,50 @@ public interface IInternodeAuthenticator
     boolean authenticate(InetAddress remoteAddress, int remotePort);
 
     /**
+     * Decides whether a peer is allowed to connect to this node.
+     * If this method returns false, the socket will be immediately closed.
+     *
+     * @param certificates client certificates
+     * @return true if the connection should be accepted, false otherwise.
+     */
+    default boolean authenticate(Certificate[] certificates)
+    {
+        return false;
+    }
+
+
+    /**
+     * Decides whether a peer is allowed to connect to this node.
+     * If this method returns false, the socket will be immediately closed.
+     *
+     * @param remoteAddress ip address of the connecting node.
+     * @param remorePort port of the connecting node.
+     * @param certificates client certificates
+     * @return true if the connection should be accepted, false otherwise.
+     */
+    default boolean authenticate(InetAddress remoteAddress, int remorePort, Certificate[] certificates)
+    {
+        if (certificates != null)
+        {
+            return authenticate(certificates);
+        }
+        return authenticate(remoteAddress, remorePort);
+    }
+
+    /**
      * Validates configuration of IInternodeAuthenticator implementation (if configurable).
      *
      * @throws ConfigurationException when there is a configuration error.
      */
     void validateConfiguration() throws ConfigurationException;
+
+    /**
+     * Setup is called once upon system startup to initialize the IAuthenticator.
+     *
+     * For example, use this method to create any required keyspaces/column families.
+     */
+    default void setup()
+    {
+
+    }
 }
