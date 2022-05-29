@@ -27,10 +27,11 @@ import java.util.concurrent.Executors;
 import com.google.common.collect.ImmutableMap;
 import org.junit.Test;
 
+import org.apache.cassandra.auth.AllowAllInternodeAuthenticator;
 import org.apache.cassandra.auth.IInternodeAuthenticator;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.Feature;
-import org.apache.cassandra.distributed.api.IIsolatedExecutor;
 import org.apache.cassandra.distributed.api.IIsolatedExecutor.SerializableRunnable;
 import org.apache.cassandra.distributed.shared.NetworkTopology;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -50,52 +51,75 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
 {
 
     @Test
-    public void testConnectionsAreRejectedWhenAuthFails() throws IOException, InterruptedException
+    public void testInboundConnectionsAreRejectedWhenAuthFails() throws IOException, InterruptedException
     {
-        Cluster.Builder builder = builder()
-        .withNodes(2)
-        .withConfig(c ->
-                    {
-                        c.with(Feature.NETWORK);
-                        c.with(Feature.NATIVE_PROTOCOL);
-
-                        HashMap<String, Object> encryption = new HashMap<>();
-                        encryption.put("keystore", "test/conf/cassandra_ssl_test.keystore");
-                        encryption.put("keystore_password", "cassandra");
-                        encryption.put("truststore", "test/conf/cassandra_ssl_test.truststore");
-                        encryption.put("truststore_password", "cassandra");
-                        encryption.put("internode_encryption", "dc");
-                        encryption.put("require_client_auth", "true");
-                        c.set("server_encryption_options", encryption);
-                        c.set("internode_authenticator", AllowNothingAuthenticator.class.getName());
-                    })
-        .withNodeIdTopology(ImmutableMap.of(1, NetworkTopology.dcAndRack("dc1", "r1a"),
-                                            2, NetworkTopology.dcAndRack("dc2", "r2a")));
+        Cluster.Builder builder = createCluster(RejectInboundConnections.class);
 
         final ExecutorService executorService = Executors.newSingleThreadExecutor();
         try (Cluster cluster = builder.start())
         {
-            executorService.submit(() -> {
-                openConnections(cluster);
-            });
+            executorService.submit(() -> openConnections(cluster));
 
             /*
-             * instance (1) should connect to instance (2) without any issues;
-             * instance (2) should connect to instance (1) without any issues.
+             * instance (1) should not connect to instance (2) as authentication fails;
+             * instance (2) should not connect to instance (1) as authentication fails.
              */
-            IIsolatedExecutor.SerializableCallable<Boolean> callable = () ->
+            SerializableRunnable runnable = () ->
             {
+                // There should be no inbound connections as authentication fails.
                 InboundMessageHandlers inbound = getOnlyElement(MessagingService.instance().messageHandlers.values());
                 assertEquals(0, inbound.count());
+
+                // There should be no outbound connections as authentication fails.
                 OutboundConnections outbound = getOnlyElement(MessagingService.instance().channelManagers.values());
                 assertTrue(!outbound.small.isConnected() && !outbound.large.isConnected() && !outbound.urgent.isConnected());
-                return true;
+
+                // Verify that the failure is due to authentication failure
+                final RejectInboundConnections authenticator = (RejectInboundConnections) DatabaseDescriptor.getInternodeAuthenticator();
+                assertTrue(authenticator.authenticationFailed);
             };
 
             // Wait for cluster to get started
             Thread.sleep(3000);
-            assertTrue(cluster.get(1).callsOnInstance(callable).call());
-            assertTrue(cluster.get(2).callsOnInstance(callable).call());
+            cluster.get(1).runOnInstance(runnable);
+            cluster.get(2).runOnInstance(runnable);
+        }
+        executorService.shutdown();
+    }
+
+    @Test
+    public void testMessagingStopsWhenOutboundAuthFails() throws IOException, InterruptedException
+    {
+        Cluster.Builder builder = createCluster(RejectOutboundAuthenticator.class);
+
+        final ExecutorService executorService = Executors.newSingleThreadExecutor();
+        try (Cluster cluster = builder.start())
+        {
+            executorService.submit(() -> openConnections(cluster));
+
+            /*
+             * instance (1) should not connect to instance (2) as authentication fails;
+             * instance (2) should not connect to instance (1) as authentication fails.
+             */
+            SerializableRunnable runnable = () ->
+            {
+                // There should be no inbound connections as authentication fails.
+                InboundMessageHandlers inbound = getOnlyElement(MessagingService.instance().messageHandlers.values());
+                assertEquals(0, inbound.count());
+
+                // There should be no outbound connections as authentication fails.
+                OutboundConnections outbound = getOnlyElement(MessagingService.instance().channelManagers.values());
+                assertTrue(!outbound.small.isConnected() && !outbound.large.isConnected() && !outbound.urgent.isConnected());
+
+                // Verify that the failure is due to authentication failure
+                final RejectOutboundAuthenticator authenticator = (RejectOutboundAuthenticator) DatabaseDescriptor.getInternodeAuthenticator();
+                assertTrue(authenticator.authenticationFailed);
+            };
+
+            // Wait for cluster to get started
+            Thread.sleep(3000);
+            cluster.get(1).runOnInstance(runnable);
+            cluster.get(2).runOnInstance(runnable);
         }
         executorService.shutdown();
     }
@@ -103,25 +127,7 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
     @Test
     public void testConnectionsAreAcceptedWhenAuthSucceds() throws IOException
     {
-        Cluster.Builder builder = builder()
-        .withNodes(2)
-        .withConfig(c ->
-                    {
-                        c.with(Feature.NETWORK);
-                        c.with(Feature.NATIVE_PROTOCOL);
-
-                        HashMap<String, Object> encryption = new HashMap<>();
-                        encryption.put("keystore", "test/conf/cassandra_ssl_test.keystore");
-                        encryption.put("keystore_password", "cassandra");
-                        encryption.put("truststore", "test/conf/cassandra_ssl_test.truststore");
-                        encryption.put("truststore_password", "cassandra");
-                        encryption.put("internode_encryption", "dc");
-                        encryption.put("require_client_auth", "true");
-                        c.set("server_encryption_options", encryption);
-                        c.set("internode_authenticator", "org.apache.cassandra.auth.AllowAllInternodeAuthenticator");
-                    })
-        .withNodeIdTopology(ImmutableMap.of(1, NetworkTopology.dcAndRack("dc1", "r1a"),
-                                            2, NetworkTopology.dcAndRack("dc2", "r2a")));
+        Cluster.Builder builder = createCluster(AllowAllInternodeAuthenticator.class);
         try (Cluster cluster = builder.start())
         {
             openConnections(cluster);
@@ -133,9 +139,11 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
 
             SerializableRunnable runnable = () ->
             {
+                // There should be inbound connections as authentication succeeds.
                 InboundMessageHandlers inbound = getOnlyElement(MessagingService.instance().messageHandlers.values());
                 assertTrue(inbound.count() > 0);
 
+                // There should be outbound connections as authentication succeeds.
                 OutboundConnections outbound = getOnlyElement(MessagingService.instance().channelManagers.values());
                 assertTrue(outbound.small.isConnected() || outbound.large.isConnected() || outbound.urgent.isConnected());
             };
@@ -261,17 +269,44 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
                              "WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 2};", false, cluster.get(2));
     }
 
-    public static class AllowNothingAuthenticator implements IInternodeAuthenticator
+    private Cluster.Builder createCluster(final Class authenticatorClass)
     {
+        return builder()
+        .withNodes(2)
+        .withConfig(c ->
+                    {
+                        c.with(Feature.NETWORK);
+                        c.with(Feature.NATIVE_PROTOCOL);
+
+                        HashMap<String, Object> encryption = new HashMap<>();
+                        encryption.put("keystore", "test/conf/cassandra_ssl_test.keystore");
+                        encryption.put("keystore_password", "cassandra");
+                        encryption.put("truststore", "test/conf/cassandra_ssl_test.truststore");
+                        encryption.put("truststore_password", "cassandra");
+                        encryption.put("internode_encryption", "dc");
+                        encryption.put("require_client_auth", "true");
+                        c.set("server_encryption_options", encryption);
+                        c.set("internode_authenticator", authenticatorClass.getName());
+                    })
+        .withNodeIdTopology(ImmutableMap.of(1, NetworkTopology.dcAndRack("dc1", "r1a"),
+                                            2, NetworkTopology.dcAndRack("dc2", "r2a")));
+    }
+
+    public static class RejectConnectionsAuthenticator implements IInternodeAuthenticator
+    {
+        boolean authenticationFailed = false;
+
         @Override
         public boolean authenticate(InetAddress remoteAddress, int remotePort)
         {
+            authenticationFailed = true;
             return false;
         }
 
         @Override
-        public boolean authenticate(InetAddress remoteAddress, int remotePort, Certificate[] certificates)
+        public boolean authenticate(InetAddress remoteAddress, int remotePort, Certificate[] certificates, InternodeConnectionType connectionType)
         {
+            authenticationFailed = true;
             return false;
         }
 
@@ -279,6 +314,32 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
         public void validateConfiguration() throws ConfigurationException
         {
 
+        }
+    }
+
+    public static class RejectInboundConnections extends RejectConnectionsAuthenticator
+    {
+        @Override
+        public boolean authenticate(InetAddress remoteAddress, int remotePort, Certificate[] certificates, InternodeConnectionType connectionType)
+        {
+            if (connectionType == InternodeConnectionType.INBOUND)
+            {
+                return super.authenticate(remoteAddress, remotePort, certificates, connectionType);
+            }
+            return true;
+        }
+    }
+
+    public static class RejectOutboundAuthenticator extends RejectConnectionsAuthenticator
+    {
+        @Override
+        public boolean authenticate(InetAddress remoteAddress, int remotePort, Certificate[] certificates, InternodeConnectionType connectionType)
+        {
+            if (connectionType == InternodeConnectionType.OUTBOUND)
+            {
+                return super.authenticate(remoteAddress, remotePort, certificates, connectionType);
+            }
+            return true;
         }
     }
 }

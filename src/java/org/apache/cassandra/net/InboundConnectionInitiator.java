@@ -26,8 +26,6 @@ import java.util.NoSuchElementException;
 import java.util.concurrent.Future;
 import java.util.function.Consumer;
 
-import javax.net.ssl.SSLPeerUnverifiedException;
-
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,6 +62,7 @@ import org.apache.cassandra.utils.memory.BufferPools;
 
 import static java.lang.Math.*;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static org.apache.cassandra.auth.IInternodeAuthenticator.InternodeConnectionType.INBOUND;
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.net.MessagingService.*;
 import static org.apache.cassandra.net.SocketFactory.WIRETRACE;
@@ -207,7 +206,6 @@ public class InboundConnectionInitiator
 
     /**
      * Handler to perform authentication for internode inbound connections.
-     * only inbound(server connections) connections needs to authenticate internode client after SSL Handshake
      * This handler is called even before messaging handshake starts.
      */
     private static class ClientAuthenticationHandler extends ByteToMessageDecoder
@@ -222,7 +220,7 @@ public class InboundConnectionInitiator
         @Override
         protected void decode(ChannelHandlerContext channelHandlerContext, ByteBuf byteBuf, List<Object> list) throws Exception
         {
-            final Certificate[] certificates = certificates(channelHandlerContext.channel());
+            final Certificate[] certificates = CertificateUtils.certificates(channelHandlerContext.channel());
             if (!authenticate(channelHandlerContext.channel().remoteAddress(), certificates))
             {
                 logger.error("Unable to authenticate peer {} for internode authentication", channelHandlerContext.channel());
@@ -240,7 +238,7 @@ public class InboundConnectionInitiator
                 throw new IOException(String.format("Unexpected SocketAddress type: %s, %s", socketAddress.getClass(), socketAddress));
 
             InetSocketAddress addr = (InetSocketAddress) socketAddress;
-            if (!authenticator.authenticate(addr.getAddress(), addr.getPort(), certificates))
+            if (!authenticator.authenticate(addr.getAddress(), addr.getPort(), certificates, INBOUND))
             {
                 // Log at info level as anything that can reach the inbound port could hit this
                 // and trigger a log of noise.  Failed outbound connections to known cluster endpoints
@@ -251,25 +249,6 @@ public class InboundConnectionInitiator
             return true;
         }
 
-        private Certificate[] certificates(Channel channel)
-        {
-            SslHandler sslHandler = (SslHandler) channel.pipeline().get("ssl");
-            Certificate[] certificates = null;
-            if (sslHandler != null)
-            {
-                try
-                {
-                    certificates = sslHandler.engine()
-                                             .getSession()
-                                             .getPeerCertificates();
-                }
-                catch (SSLPeerUnverifiedException e)
-                {
-                    logger.debug("Failed to get peer certificates for peer {}", channel.remoteAddress(), e);
-                }
-            }
-            return certificates;
-        }
     }
 
     /**
@@ -297,8 +276,7 @@ public class InboundConnectionInitiator
         }
 
         /**
-         * On registration, immediately schedule a timeout to kill this connection if it does not handshake promptly,
-         * and authenticate the remote address.
+         * On registration, immediately schedule a timeout to kill this connection if it does not handshake promptly.
          */
         public void handlerAdded(ChannelHandlerContext ctx) throws Exception
         {
@@ -306,7 +284,6 @@ public class InboundConnectionInitiator
                 logger.error("Timeout handshaking with {} (on {})", SocketFactory.addressId(initiate.from, (InetSocketAddress) ctx.channel().remoteAddress()), settings.bindAddress);
                 failHandshake(ctx);
             }, HandshakeProtocol.TIMEOUT_MILLIS, MILLISECONDS);
-
         }
 
         @Override

@@ -31,11 +31,6 @@ public class AllowAllInternodeAuthenticator implements IInternodeAuthenticator
         return true;
     }
 
-    public boolean authenticate(Certificate[] certificates)
-    {
-        return true;
-    }
-
     public void validateConfiguration() throws ConfigurationException
     {
     }

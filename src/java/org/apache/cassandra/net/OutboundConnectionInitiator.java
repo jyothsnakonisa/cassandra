@@ -21,6 +21,7 @@ package org.apache.cassandra.net;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.channels.ClosedChannelException;
+import java.security.cert.Certificate;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -59,6 +60,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.memory.BufferPools;
 
 import static java.util.concurrent.TimeUnit.*;
+import static org.apache.cassandra.auth.IInternodeAuthenticator.InternodeConnectionType.OUTBOUND;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.HandshakeProtocol.*;
 import static org.apache.cassandra.net.ConnectionType.STREAMING;
@@ -204,15 +206,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 logger.trace("creating outbound netty SslContext: context={}, engine={}", sslContext.getClass().getName(), sslHandler.engine().getClass().getName());
                 pipeline.addFirst("ssl", sslHandler);
             }
-            else
-            {
-                // If a connection is SSL based we don't need to make additional authentication when making a client
-                // connection. Trusted roots in the client's truststore would suffice for authentication.
-                //
-                // Outbound connection is a client connection we don't need to extract identity from server certificate and authenticate.
-                // Add this ServerAuthenticationHandler only when encryption is not enabled just for backward compatibility.
-                pipeline.addLast("server-authentication", new ServerAuthenticationHandler());
-            }
+            pipeline.addLast("server-authentication", new ServerAuthenticationHandler());
 
             if (WIRETRACE)
                 pipeline.addLast("logger", new LoggingHandler(LogLevel.INFO));
@@ -223,8 +217,10 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
     }
 
     /**
-     * Authenticates the server when a connection is non-ssl based connection. If a connection is SSL based connection
-     * Server's identity is verified during ssl handshake using root certificate in truststore.
+     * Authenticates the server before an outbound connection is established. If a connection is SSL based connection
+     * Server's identity is verified during ssl handshake using root certificate in truststore. One may choose to ignore
+     * outbound authentication or perform required authentication for outbound connections in the implementation
+     * of IInternodeAuthenticator interface.
      */
     private class ServerAuthenticationHandler extends ByteToMessageDecoder
     {
@@ -232,13 +228,15 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         @Override
         protected void decode(ChannelHandlerContext channelHandlerContext, ByteBuf byteBuf, List<Object> list) throws Exception
         {
-            if (!settings.authenticator.authenticate(settings.to.getAddress(), settings.to.getPort()))
+            final Certificate[] certificates = CertificateUtils.certificates(channelHandlerContext.channel());
+            if (!settings.authenticator.authenticate(settings.to.getAddress(), settings.to.getPort(), certificates, OUTBOUND))
             {
                 // interrupt other connections, so they must attempt to re-authenticate
                 MessagingService.instance().interruptOutbound(settings.to);
                 logger.error("authentication failed to " + settings.connectToId());
                 channelHandlerContext.close();
             }
+            channelHandlerContext.pipeline().remove(this);
         }
     }
 

@@ -39,32 +39,25 @@ public interface IInternodeAuthenticator
     /**
      * Decides whether a peer is allowed to connect to this node.
      * If this method returns false, the socket will be immediately closed.
+     * <p>
+     * Default implementation calls authenticate method by IP and port method
+     * <p>
+     * 1. If it is IP based authentication ignore the certificates & connectionType parameters in the implementation
+     * of this method.
+     * 2. For certificate based authentication like mTLS, server's identity for outbound connections is verified by the
+     * trusted root certificates in the outbound_keystore. In such cases this method may be overridden to return true
+     * when certificateType is OUTBOUND, as the authentication of the server happens during SSL Handshake.
      *
-     * @param certificates client certificates
+     * @param remoteAddress  ip address of the connecting node.
+     * @param remotePort     port of the connecting node.
+     * @param certificates   peer certificates
+     * @param connectionType If the connection is inbound/outbound connection.
      * @return true if the connection should be accepted, false otherwise.
      */
-    default boolean authenticate(Certificate[] certificates)
+    default boolean authenticate(InetAddress remoteAddress, int remotePort,
+                                 Certificate[] certificates, InternodeConnectionType connectionType)
     {
-        return false;
-    }
-
-
-    /**
-     * Decides whether a peer is allowed to connect to this node.
-     * If this method returns false, the socket will be immediately closed.
-     *
-     * @param remoteAddress ip address of the connecting node.
-     * @param remorePort port of the connecting node.
-     * @param certificates client certificates
-     * @return true if the connection should be accepted, false otherwise.
-     */
-    default boolean authenticate(InetAddress remoteAddress, int remorePort, Certificate[] certificates)
-    {
-        if (certificates != null)
-        {
-            return authenticate(certificates);
-        }
-        return authenticate(remoteAddress, remorePort);
+        return authenticate(remoteAddress, remotePort);
     }
 
     /**
@@ -79,8 +72,17 @@ public interface IInternodeAuthenticator
      *
      * For example, use this method to create any required keyspaces/column families.
      */
-    default void setup()
+    default void setupInternode()
     {
 
+    }
+
+    /**
+     * Enum that represents connection type of an internode connection.
+     */
+    enum InternodeConnectionType
+    {
+        INBOUND,
+        OUTBOUND
     }
 }
