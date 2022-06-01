@@ -228,6 +228,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         @Override
         protected void decode(ChannelHandlerContext channelHandlerContext, ByteBuf byteBuf, List<Object> list) throws Exception
         {
+            // Extract certificates from SSL handler(handler with name "ssl").
             final Certificate[] certificates = CertificateUtils.certificates(channelHandlerContext.channel());
             if (!settings.authenticator.authenticate(settings.to.getAddress(), settings.to.getPort(), certificates, OUTBOUND))
             {

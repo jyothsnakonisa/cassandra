@@ -33,11 +33,11 @@ import io.netty.handler.ssl.SslHandler;
 class CertificateUtils
 {
     private static final Logger logger = LoggerFactory.getLogger(CertificateUtils.class);
-    private static String SSL_PIPELINE_NAME = "ssl";
+    private static String SSL_HANDLER_NAME = "ssl";
 
     public static Certificate[] certificates(Channel channel)
     {
-        final SslHandler sslHandler = (SslHandler) channel.pipeline().get(SSL_PIPELINE_NAME);
+        final SslHandler sslHandler = (SslHandler) channel.pipeline().get(SSL_HANDLER_NAME);
         Certificate[] certificates = null;
         if (sslHandler != null)
         {
