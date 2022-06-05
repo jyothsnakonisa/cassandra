@@ -34,6 +34,7 @@ public interface IInternodeAuthenticator
      * @param remotePort port of the connecting node.
      * @return true if the connection should be accepted, false otherwise.
      */
+    @Deprecated
     boolean authenticate(InetAddress remoteAddress, int remotePort);
 
     /**
@@ -55,7 +56,7 @@ public interface IInternodeAuthenticator
      * @return true if the connection should be accepted, false otherwise.
      */
     default boolean authenticate(InetAddress remoteAddress, int remotePort,
-                                 Certificate[] certificates, InternodeConnectionType connectionType)
+                                 Certificate[] certificates, InternodeConnectionDirection connectionType)
     {
         return authenticate(remoteAddress, remotePort);
     }
@@ -80,7 +81,7 @@ public interface IInternodeAuthenticator
     /**
      * Enum that represents connection type of an internode connection.
      */
-    enum InternodeConnectionType
+    enum InternodeConnectionDirection
     {
         INBOUND,
         OUTBOUND

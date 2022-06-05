@@ -299,12 +299,11 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
         @Override
         public boolean authenticate(InetAddress remoteAddress, int remotePort)
         {
-            authenticationFailed = true;
-            return false;
+           throw new IllegalStateException("This method should not be called for authentication");
         }
 
         @Override
-        public boolean authenticate(InetAddress remoteAddress, int remotePort, Certificate[] certificates, InternodeConnectionType connectionType)
+        public boolean authenticate(InetAddress remoteAddress, int remotePort, Certificate[] certificates, InternodeConnectionDirection connectionType)
         {
             authenticationFailed = true;
             return false;
@@ -320,9 +319,9 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
     public static class RejectInboundConnections extends RejectConnectionsAuthenticator
     {
         @Override
-        public boolean authenticate(InetAddress remoteAddress, int remotePort, Certificate[] certificates, InternodeConnectionType connectionType)
+        public boolean authenticate(InetAddress remoteAddress, int remotePort, Certificate[] certificates, InternodeConnectionDirection connectionType)
         {
-            if (connectionType == InternodeConnectionType.INBOUND)
+            if (connectionType == InternodeConnectionDirection.INBOUND)
             {
                 return super.authenticate(remoteAddress, remotePort, certificates, connectionType);
             }
@@ -333,9 +332,9 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
     public static class RejectOutboundAuthenticator extends RejectConnectionsAuthenticator
     {
         @Override
-        public boolean authenticate(InetAddress remoteAddress, int remotePort, Certificate[] certificates, InternodeConnectionType connectionType)
+        public boolean authenticate(InetAddress remoteAddress, int remotePort, Certificate[] certificates, InternodeConnectionDirection connectionType)
         {
-            if (connectionType == InternodeConnectionType.OUTBOUND)
+            if (connectionType == InternodeConnectionDirection.OUTBOUND)
             {
                 return super.authenticate(remoteAddress, remotePort, certificates, connectionType);
             }

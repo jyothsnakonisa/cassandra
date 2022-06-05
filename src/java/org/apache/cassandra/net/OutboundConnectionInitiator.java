@@ -60,7 +60,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.memory.BufferPools;
 
 import static java.util.concurrent.TimeUnit.*;
-import static org.apache.cassandra.auth.IInternodeAuthenticator.InternodeConnectionType.OUTBOUND;
+import static org.apache.cassandra.auth.IInternodeAuthenticator.InternodeConnectionDirection.OUTBOUND;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.HandshakeProtocol.*;
 import static org.apache.cassandra.net.ConnectionType.STREAMING;
