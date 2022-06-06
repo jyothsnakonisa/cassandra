@@ -64,6 +64,7 @@ import static java.lang.Math.*;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.auth.IInternodeAuthenticator.InternodeConnectionDirection.INBOUND;
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
+import static org.apache.cassandra.net.CertificateUtils.SSL_HANDLER_NAME;
 import static org.apache.cassandra.net.MessagingService.*;
 import static org.apache.cassandra.net.SocketFactory.WIRETRACE;
 import static org.apache.cassandra.net.SocketFactory.newSslHandler;
@@ -114,11 +115,11 @@ public class InboundConnectionInitiator
                     pipeline.addAfter(PIPELINE_INTERNODE_ERROR_EXCLUSIONS, "rejectssl", new RejectSslHandler());
                     break;
                 case OPTIONAL:
-                    pipeline.addAfter(PIPELINE_INTERNODE_ERROR_EXCLUSIONS, "ssl", new OptionalSslHandler(settings.encryption));
+                    pipeline.addAfter(PIPELINE_INTERNODE_ERROR_EXCLUSIONS, SSL_HANDLER_NAME, new OptionalSslHandler(settings.encryption));
                     break;
                 case ENCRYPTED:
                     SslHandler sslHandler = getSslHandler("creating", channel, settings.encryption);
-                    pipeline.addAfter(PIPELINE_INTERNODE_ERROR_EXCLUSIONS, "ssl", sslHandler);
+                    pipeline.addAfter(PIPELINE_INTERNODE_ERROR_EXCLUSIONS, SSL_HANDLER_NAME, sslHandler);
                     break;
             }
 
@@ -590,7 +591,7 @@ public class InboundConnectionInitiator
             {
                 // Connection uses SSL/TLS, replace the detection handler with a SslHandler and so use encryption.
                 SslHandler sslHandler = getSslHandler("replacing optional", ctx.channel(), encryptionOptions);
-                ctx.pipeline().replace(this, "ssl", sslHandler);
+                ctx.pipeline().replace(this, SSL_HANDLER_NAME, sslHandler);
             }
             else
             {

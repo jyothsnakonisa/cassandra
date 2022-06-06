@@ -61,6 +61,7 @@ import org.apache.cassandra.utils.memory.BufferPools;
 
 import static java.util.concurrent.TimeUnit.*;
 import static org.apache.cassandra.auth.IInternodeAuthenticator.InternodeConnectionDirection.OUTBOUND;
+import static org.apache.cassandra.net.CertificateUtils.SSL_HANDLER_NAME;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.HandshakeProtocol.*;
 import static org.apache.cassandra.net.ConnectionType.STREAMING;
@@ -204,7 +205,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 InetSocketAddress peer = settings.encryption.require_endpoint_verification ? new InetSocketAddress(address.getAddress(), address.getPort()) : null;
                 SslHandler sslHandler = newSslHandler(channel, sslContext, peer);
                 logger.trace("creating outbound netty SslContext: context={}, engine={}", sslContext.getClass().getName(), sslHandler.engine().getClass().getName());
-                pipeline.addFirst("ssl", sslHandler);
+                pipeline.addFirst(SSL_HANDLER_NAME, sslHandler);
             }
             pipeline.addLast("server-authentication", new ServerAuthenticationHandler());
 

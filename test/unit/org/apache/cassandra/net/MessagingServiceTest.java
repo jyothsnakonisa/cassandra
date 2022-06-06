@@ -49,6 +49,7 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.awaitility.Awaitility;
 import org.caffinitas.ohc.histo.EstimatedHistogram;
@@ -262,6 +263,11 @@ public class MessagingServiceTest
 
             int rejectedBefore = rejectedConnections.get();
             Future<Void> connectFuture = testChannel.connect(new InetSocketAddress(listenAddress, DatabaseDescriptor.getStoragePort()));
+            Awaitility.await().atMost(10, TimeUnit.SECONDS).until(connectFuture::isDone);
+
+            // Since authentication doesn't happen during connect, try writing a dummy string which triggers
+            // authentication handler.
+            testChannel.write(ByteBufferUtil.bytes("dummy string"));
             Awaitility.await().atMost(10, TimeUnit.SECONDS).until(() -> rejectedConnections.get() > rejectedBefore);
 
             connectFuture.cancel(true);

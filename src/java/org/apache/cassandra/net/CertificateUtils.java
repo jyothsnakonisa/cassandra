@@ -28,12 +28,12 @@ import io.netty.channel.Channel;
 import io.netty.handler.ssl.SslHandler;
 
 /**
- * Interface that contains certificate utility methods.
+ * Class that contains certificate utility methods.
  */
 class CertificateUtils
 {
+    public static String SSL_HANDLER_NAME = "ssl";
     private static final Logger logger = LoggerFactory.getLogger(CertificateUtils.class);
-    private static String SSL_HANDLER_NAME = "ssl";
 
     public static Certificate[] certificates(Channel channel)
     {

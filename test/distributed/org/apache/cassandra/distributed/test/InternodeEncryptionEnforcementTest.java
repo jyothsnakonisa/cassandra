@@ -17,12 +17,16 @@
  */
 package org.apache.cassandra.distributed.test;
 
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetAddress;
+import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.util.HashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeoutException;
 
 import com.google.common.collect.ImmutableMap;
 import org.junit.Test;
@@ -51,7 +55,7 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
 {
 
     @Test
-    public void testInboundConnectionsAreRejectedWhenAuthFails() throws IOException, InterruptedException
+    public void testInboundConnectionsAreRejectedWhenAuthFails() throws IOException, TimeoutException
     {
         Cluster.Builder builder = createCluster(RejectInboundConnections.class);
 
@@ -79,16 +83,17 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
                 assertTrue(authenticator.authenticationFailed);
             };
 
-            // Wait for cluster to get started
-            Thread.sleep(3000);
+            // Wait for authentication to fail
+            cluster.get(1).logs().watchFor("Unable to authenticate peer");
             cluster.get(1).runOnInstance(runnable);
+            cluster.get(2).logs().watchFor("Unable to authenticate peer");
             cluster.get(2).runOnInstance(runnable);
         }
         executorService.shutdown();
     }
 
     @Test
-    public void testMessagingStopsWhenOutboundAuthFails() throws IOException, InterruptedException
+    public void testMessagingStopsWhenOutboundAuthFails() throws IOException, InterruptedException, TimeoutException
     {
         Cluster.Builder builder = createCluster(RejectOutboundAuthenticator.class);
 
@@ -116,9 +121,10 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
                 assertTrue(authenticator.authenticationFailed);
             };
 
-            // Wait for cluster to get started
-            Thread.sleep(3000);
+            // Wait for authentication to fail
+            cluster.get(1).logs().watchFor("authentication failed");
             cluster.get(1).runOnInstance(runnable);
+            cluster.get(2).logs().watchFor("authentication failed");
             cluster.get(2).runOnInstance(runnable);
         }
         executorService.shutdown();
@@ -127,30 +133,13 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
     @Test
     public void testConnectionsAreAcceptedWhenAuthSucceds() throws IOException
     {
-        Cluster.Builder builder = createCluster(AllowAllInternodeAuthenticator.class);
-        try (Cluster cluster = builder.start())
-        {
-            openConnections(cluster);
+        verifyAuthenticationSucceeds(AllowAllInternodeAuthenticator.class);
+    }
 
-            /*
-             * instance (1) should connect to instance (2) without any issues;
-             * instance (2) should connect to instance (1) without any issues.
-             */
-
-            SerializableRunnable runnable = () ->
-            {
-                // There should be inbound connections as authentication succeeds.
-                InboundMessageHandlers inbound = getOnlyElement(MessagingService.instance().messageHandlers.values());
-                assertTrue(inbound.count() > 0);
-
-                // There should be outbound connections as authentication succeeds.
-                OutboundConnections outbound = getOnlyElement(MessagingService.instance().channelManagers.values());
-                assertTrue(outbound.small.isConnected() || outbound.large.isConnected() || outbound.urgent.isConnected());
-            };
-
-            cluster.get(1).runOnInstance(runnable);
-            cluster.get(2).runOnInstance(runnable);
-        }
+    @Test
+    public void testAuthenticationWithCertificateAuthenticator() throws IOException
+    {
+        verifyAuthenticationSucceeds(CertificateVerifyAuthenticator.class);
     }
 
     @Test
@@ -269,6 +258,34 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
                              "WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 2};", false, cluster.get(2));
     }
 
+    private void verifyAuthenticationSucceeds(final Class authenticatorClass) throws IOException
+    {
+        Cluster.Builder builder = createCluster(authenticatorClass);
+        try (Cluster cluster = builder.start())
+        {
+            openConnections(cluster);
+
+            /*
+             * instance (1) should connect to instance (2) without any issues;
+             * instance (2) should connect to instance (1) without any issues.
+             */
+
+            SerializableRunnable runnable = () ->
+            {
+                // There should be inbound connections as authentication succeeds.
+                InboundMessageHandlers inbound = getOnlyElement(MessagingService.instance().messageHandlers.values());
+                assertTrue(inbound.count() > 0);
+
+                // There should be outbound connections as authentication succeeds.
+                OutboundConnections outbound = getOnlyElement(MessagingService.instance().channelManagers.values());
+                assertTrue(outbound.small.isConnected() || outbound.large.isConnected() || outbound.urgent.isConnected());
+            };
+
+            cluster.get(1).runOnInstance(runnable);
+            cluster.get(2).runOnInstance(runnable);
+        }
+    }
+
     private Cluster.Builder createCluster(final Class authenticatorClass)
     {
         return builder()
@@ -283,13 +300,49 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
                         encryption.put("keystore_password", "cassandra");
                         encryption.put("truststore", "test/conf/cassandra_ssl_test.truststore");
                         encryption.put("truststore_password", "cassandra");
-                        encryption.put("internode_encryption", "dc");
+                        encryption.put("internode_encryption", "all");
                         encryption.put("require_client_auth", "true");
                         c.set("server_encryption_options", encryption);
                         c.set("internode_authenticator", authenticatorClass.getName());
                     })
         .withNodeIdTopology(ImmutableMap.of(1, NetworkTopology.dcAndRack("dc1", "r1a"),
                                             2, NetworkTopology.dcAndRack("dc2", "r2a")));
+    }
+
+    // Authenticator that validates certificate authentication
+    public static class CertificateVerifyAuthenticator implements IInternodeAuthenticator
+    {
+
+        @Override
+        public boolean authenticate(InetAddress remoteAddress, int remotePort)
+        {
+            throw new IllegalStateException("This method should not be called for authentication");
+        }
+
+        @Override
+        public boolean authenticate(InetAddress remoteAddress, int remotePort, Certificate[] certificates, InternodeConnectionDirection connectionType)
+        {
+            try
+            {
+                // Check if the presented certificates during internode authentication are the ones in the keystores
+                // configured in the cassandra.yaml configuration.
+                KeyStore keyStore = KeyStore.getInstance("JKS");
+                char[] keyStorePassword = "cassandra".toCharArray();
+                InputStream keyStoreData = new FileInputStream("test/conf/cassandra_ssl_test.keystore");
+                keyStore.load(keyStoreData, keyStorePassword);
+                return certificates != null && certificates.length != 0 && keyStore.getCertificate("cassandra_ssl_test").equals(certificates[0]);
+            }
+            catch (Exception e)
+            {
+                return false;
+            }
+        }
+
+        @Override
+        public void validateConfiguration() throws ConfigurationException
+        {
+
+        }
     }
 
     public static class RejectConnectionsAuthenticator implements IInternodeAuthenticator
