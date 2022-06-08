@@ -19,12 +19,14 @@
 package org.apache.cassandra.net;
 
 import java.security.cert.Certificate;
+import java.util.List;
 import javax.net.ssl.SSLPeerUnverifiedException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.ssl.SslHandler;
 
 /**
@@ -33,6 +35,9 @@ import io.netty.handler.ssl.SslHandler;
 class CertificateUtils
 {
     public static String SSL_HANDLER_NAME = "ssl";
+    public static String AUTHENTICATION_HANDLER_NAME = "authentication";
+    public static String LOGGER_HANDLER_NAME = "logger";
+    public static String HANDSHAKE_HANDLER_NAME = "handshake";
     private static final Logger logger = LoggerFactory.getLogger(CertificateUtils.class);
 
     public static Certificate[] certificates(Channel channel)
@@ -53,5 +58,24 @@ class CertificateUtils
             }
         }
         return certificates;
+    }
+
+    public static void removeHandlersAndCloseTheChannel(ChannelHandlerContext channelHandlerContext) {
+        final List<String> handlerNames = channelHandlerContext.pipeline().names();
+        try {
+            channelHandlerContext.pipeline().remove(AUTHENTICATION_HANDLER_NAME);
+            channelHandlerContext.pipeline().remove(HANDSHAKE_HANDLER_NAME);
+        } finally
+        {
+            channelHandlerContext.pipeline().close();
+        }
+
+//        final int authHandlerIndex = handlerNames.indexOf(AUTHENTICATION_HANDLER_NAME);
+//        final List<String> handlersToBeRemoved = handlerNames.subList(authHandlerIndex, handlerNames.size()-1);
+//        for(final String handler: handlersToBeRemoved) {
+//            channelHandlerContext.pipeline().remove(handler);
+//        }
+//        channelHandlerContext.channel().close();
+
     }
 }

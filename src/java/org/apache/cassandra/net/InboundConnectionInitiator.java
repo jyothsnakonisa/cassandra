@@ -64,7 +64,10 @@ import static java.lang.Math.*;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.auth.IInternodeAuthenticator.InternodeConnectionDirection.INBOUND;
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
+import static org.apache.cassandra.net.CertificateUtils.HANDSHAKE_HANDLER_NAME;
+import static org.apache.cassandra.net.CertificateUtils.LOGGER_HANDLER_NAME;
 import static org.apache.cassandra.net.CertificateUtils.SSL_HANDLER_NAME;
+import static org.apache.cassandra.net.CertificateUtils.certificates;
 import static org.apache.cassandra.net.MessagingService.*;
 import static org.apache.cassandra.net.SocketFactory.WIRETRACE;
 import static org.apache.cassandra.net.SocketFactory.newSslHandler;
@@ -106,7 +109,7 @@ public class InboundConnectionInitiator
 
             pipelineInjector.accept(pipeline);
 
-            // order of handlers: ssl -> client-authentication -> logger -> handshakeHandler
+            // order of handlers: ssl -> authentication -> logger -> handshakeHandler
             // For either unencrypted or transitional modes, allow Ssl optionally.
             switch(settings.encryption.tlsEncryptionPolicy())
             {
@@ -124,12 +127,12 @@ public class InboundConnectionInitiator
             }
 
             // Pipeline for performing client authentication
-            pipeline.addLast("client-authentication", new ClientAuthenticationHandler(settings.authenticator));
+            pipeline.addLast("authentication", new ClientAuthenticationHandler(settings.authenticator));
 
             if (WIRETRACE)
-                pipeline.addLast("logger", new LoggingHandler(LogLevel.INFO));
+                pipeline.addLast(LOGGER_HANDLER_NAME, new LoggingHandler(LogLevel.INFO));
 
-            channel.pipeline().addLast("handshake", new Handler(settings));
+            channel.pipeline().addLast(HANDSHAKE_HANDLER_NAME, new Handler(settings));
         }
     }
 
@@ -222,13 +225,16 @@ public class InboundConnectionInitiator
         protected void decode(ChannelHandlerContext channelHandlerContext, ByteBuf byteBuf, List<Object> list) throws Exception
         {
             // Extract certificates from SSL handler(handler with name "ssl").
-            final Certificate[] certificates = CertificateUtils.certificates(channelHandlerContext.channel());
+            final Certificate[] certificates = certificates(channelHandlerContext.channel());
             if (!authenticate(channelHandlerContext.channel().remoteAddress(), certificates))
             {
                 logger.error("Unable to authenticate peer {} for internode authentication", channelHandlerContext.channel());
-                channelHandlerContext.close();
+                CertificateUtils.removeHandlersAndCloseTheChannel(channelHandlerContext);
             }
-            channelHandlerContext.pipeline().remove(this);
+            else
+            {
+                channelHandlerContext.pipeline().remove(this);
+            }
         }
 
         private boolean authenticate(SocketAddress socketAddress, final Certificate[] certificates) throws IOException

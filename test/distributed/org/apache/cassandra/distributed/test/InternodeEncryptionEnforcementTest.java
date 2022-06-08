@@ -70,9 +70,8 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
              */
             SerializableRunnable runnable = () ->
             {
-                // There should be no inbound connections as authentication fails.
-                InboundMessageHandlers inbound = getOnlyElement(MessagingService.instance().messageHandlers.values());
-                assertEquals(0, inbound.count());
+                // There should be no inbound handlers as authentication fails and we remove handlers.
+                assertEquals(0, MessagingService.instance().messageHandlers.values().size());
 
                 // There should be no outbound connections as authentication fails.
                 OutboundConnections outbound = getOnlyElement(MessagingService.instance().channelManagers.values());
@@ -93,7 +92,7 @@ public final class InternodeEncryptionEnforcementTest extends TestBaseImpl
     }
 
     @Test
-    public void testMessagingStopsWhenOutboundAuthFails() throws IOException, InterruptedException, TimeoutException
+    public void testMessagingStopsWhenOutboundAuthFails() throws IOException, TimeoutException
     {
         Cluster.Builder builder = createCluster(RejectOutboundAuthenticator.class);
 

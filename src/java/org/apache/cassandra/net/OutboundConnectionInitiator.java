@@ -61,7 +61,10 @@ import org.apache.cassandra.utils.memory.BufferPools;
 
 import static java.util.concurrent.TimeUnit.*;
 import static org.apache.cassandra.auth.IInternodeAuthenticator.InternodeConnectionDirection.OUTBOUND;
+import static org.apache.cassandra.net.CertificateUtils.HANDSHAKE_HANDLER_NAME;
+import static org.apache.cassandra.net.CertificateUtils.LOGGER_HANDLER_NAME;
 import static org.apache.cassandra.net.CertificateUtils.SSL_HANDLER_NAME;
+import static org.apache.cassandra.net.CertificateUtils.certificates;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.HandshakeProtocol.*;
 import static org.apache.cassandra.net.ConnectionType.STREAMING;
@@ -194,7 +197,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         {
             ChannelPipeline pipeline = channel.pipeline();
 
-            // order of handlers: ssl -> server-authentication -> logger -> handshakeHandler
+            // order of handlers: ssl -> authentication -> logger -> handshakeHandler
             if (settings.withEncryption())
             {
                 // check if we should actually encrypt this connection
@@ -207,12 +210,12 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 logger.trace("creating outbound netty SslContext: context={}, engine={}", sslContext.getClass().getName(), sslHandler.engine().getClass().getName());
                 pipeline.addFirst(SSL_HANDLER_NAME, sslHandler);
             }
-            pipeline.addLast("server-authentication", new ServerAuthenticationHandler());
+            pipeline.addLast("authentication", new ServerAuthenticationHandler());
 
             if (WIRETRACE)
-                pipeline.addLast("logger", new LoggingHandler(LogLevel.INFO));
+                pipeline.addLast(LOGGER_HANDLER_NAME, new LoggingHandler(LogLevel.INFO));
 
-            pipeline.addLast("handshake", new Handler());
+            pipeline.addLast(HANDSHAKE_HANDLER_NAME, new Handler());
         }
 
     }
@@ -230,14 +233,14 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         protected void decode(ChannelHandlerContext channelHandlerContext, ByteBuf byteBuf, List<Object> list) throws Exception
         {
             // Extract certificates from SSL handler(handler with name "ssl").
-            final Certificate[] certificates = CertificateUtils.certificates(channelHandlerContext.channel());
+            final Certificate[] certificates = certificates(channelHandlerContext.channel());
             if (!settings.authenticator.authenticate(settings.to.getAddress(), settings.to.getPort(), certificates, OUTBOUND))
             {
                 // interrupt other connections, so they must attempt to re-authenticate
                 MessagingService.instance().interruptOutbound(settings.to);
                 logger.error("authentication failed to " + settings.connectToId());
-                channelHandlerContext.close();
-            }
+                CertificateUtils.removeHandlersAndCloseTheChannel(channelHandlerContext);
+            } else
             channelHandlerContext.pipeline().remove(this);
         }
     }
