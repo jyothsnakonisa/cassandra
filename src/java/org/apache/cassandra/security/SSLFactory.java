@@ -47,6 +47,8 @@ import org.apache.cassandra.security.ISslContextFactory.SocketType;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLE_TCACTIVE_OPENSSL;
 
+import static org.apache.cassandra.config.EncryptionOptions.ClientAuth.REQUIRED;
+
 /**
  * A Factory for providing and setting up client {@link SSLSocket}s. Also provides
  * methods for creating both JSSE {@link SSLContext} instances as well as netty {@link SslContext} instances.
@@ -122,15 +124,15 @@ public final class SSLFactory
     /**
      * Create a JSSE {@link SSLContext}.
      */
-    public static SSLContext createSSLContext(EncryptionOptions options, boolean verifyPeerCertificate) throws IOException
+    public static SSLContext createSSLContext(EncryptionOptions options, EncryptionOptions.ClientAuth clientAuth) throws IOException
     {
-        return options.sslContextFactoryInstance.createJSSESslContext(verifyPeerCertificate);
+        return options.sslContextFactoryInstance.createJSSESslContext(clientAuth);
     }
 
     /**
      * get a netty {@link SslContext} instance
      */
-    public static SslContext getOrCreateSslContext(EncryptionOptions options, boolean verifyPeerCertificate,
+    public static SslContext getOrCreateSslContext(EncryptionOptions options, EncryptionOptions.ClientAuth clientAuth,
                                                    SocketType socketType) throws IOException
     {
         CacheKey key = new CacheKey(options, socketType);
@@ -140,7 +142,7 @@ public final class SSLFactory
         if (sslContext != null)
             return sslContext;
 
-        sslContext = createNettySslContext(options, verifyPeerCertificate, socketType);
+        sslContext = createNettySslContext(options, clientAuth, socketType);
 
         SslContext previous = cachedSslContexts.putIfAbsent(key, sslContext);
         if (previous == null)
@@ -153,20 +155,20 @@ public final class SSLFactory
     /**
      * Create a Netty {@link SslContext}
      */
-    static SslContext createNettySslContext(EncryptionOptions options, boolean verifyPeerCertificate,
+    static SslContext createNettySslContext(EncryptionOptions options, EncryptionOptions.ClientAuth clientAuth,
                                             SocketType socketType) throws IOException
     {
-        return createNettySslContext(options, verifyPeerCertificate, socketType,
+        return createNettySslContext(options, clientAuth, socketType,
                                      LoggingCipherSuiteFilter.QUIET_FILTER);
     }
 
     /**
      * Create a Netty {@link SslContext} with a supplied cipherFilter
      */
-    static SslContext createNettySslContext(EncryptionOptions options, boolean verifyPeerCertificate,
+    static SslContext createNettySslContext(EncryptionOptions options, EncryptionOptions.ClientAuth clientAuth,
                                             SocketType socketType, CipherSuiteFilter cipherFilter) throws IOException
     {
-        return options.sslContextFactoryInstance.createNettySslContext(verifyPeerCertificate, socketType,
+        return options.sslContextFactoryInstance.createNettySslContext(clientAuth, socketType,
                                                                        cipherFilter);
     }
 
@@ -187,16 +189,16 @@ public final class SSLFactory
 
         if (serverOpts != null)
         {
-            checkCertFilesForHotReloading(serverOpts, "server_encryption_options", true);
+            checkCertFilesForHotReloading(serverOpts, "server_encryption_options", REQUIRED);
         }
         if (clientOpts != null)
         {
-            checkCertFilesForHotReloading(clientOpts, "client_encryption_options", clientOpts.require_client_auth);
+            checkCertFilesForHotReloading(clientOpts, "client_encryption_options", clientOpts.getClientAuth());
         }
     }
 
     private static void checkCertFilesForHotReloading(EncryptionOptions options, String contextDescription,
-                                                      boolean verifyPeerCertificate)
+                                                      EncryptionOptions.ClientAuth clientAuth)
     {
         try
         {
@@ -204,7 +206,7 @@ public final class SSLFactory
             {
                 logger.info("SSL certificates have been updated for {}. Resetting the ssl contexts for new " +
                             "connections.", options.getClass().getName());
-                validateSslContext(contextDescription, options, verifyPeerCertificate, false);
+                validateSslContext(contextDescription, options, clientAuth, false);
                 clearSslContextCache(options);
             }
         }
@@ -345,7 +347,7 @@ public final class SSLFactory
         return !string.equals("SSLv2Hello");
     }
 
-    public static void validateSslContext(String contextDescription, EncryptionOptions options, boolean verifyPeerCertificate, boolean logProtocolAndCiphers) throws IOException
+    public static void validateSslContext(String contextDescription, EncryptionOptions options, EncryptionOptions.ClientAuth clientAuth, boolean logProtocolAndCiphers) throws IOException
     {
         if (options != null && options.tlsEncryptionPolicy() != EncryptionOptions.TlsEncryptionPolicy.UNENCRYPTED)
         {
@@ -353,7 +355,7 @@ public final class SSLFactory
             {
                 CipherSuiteFilter loggingCipherSuiteFilter = logProtocolAndCiphers ? new LoggingCipherSuiteFilter(contextDescription)
                                                                                    : LoggingCipherSuiteFilter.QUIET_FILTER;
-                SslContext serverSslContext = createNettySslContext(options, verifyPeerCertificate, SocketType.SERVER, loggingCipherSuiteFilter);
+                SslContext serverSslContext = createNettySslContext(options, clientAuth, SocketType.SERVER, loggingCipherSuiteFilter);
                 try
                 {
                     SSLEngine engine = serverSslContext.newEngine(ByteBufAllocator.DEFAULT);
@@ -398,7 +400,7 @@ public final class SSLFactory
                 }
 
                 // Make sure it is possible to build the client context too
-                SslContext clientSslContext = createNettySslContext(options, verifyPeerCertificate, SocketType.CLIENT);
+                SslContext clientSslContext = createNettySslContext(options, clientAuth, SocketType.CLIENT);
                 ReferenceCountUtil.release(clientSslContext);
             }
             catch (Exception e)
@@ -413,8 +415,8 @@ public final class SSLFactory
      */
     public static void validateSslCerts(EncryptionOptions.ServerEncryptionOptions serverOpts, EncryptionOptions clientOpts) throws IOException
     {
-        validateSslContext("server_encryption_options", serverOpts, true, false);
-        validateSslContext("client_encryption_options", clientOpts, clientOpts.require_client_auth, false);
+        validateSslContext("server_encryption_options", serverOpts, REQUIRED, false);
+        validateSslContext("client_encryption_options", clientOpts, clientOpts.getClientAuth(), false);
     }
 
     static class CacheKey

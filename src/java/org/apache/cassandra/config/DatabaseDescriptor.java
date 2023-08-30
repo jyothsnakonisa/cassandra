@@ -135,6 +135,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYS
 import static org.apache.cassandra.config.DataRateSpec.DataRateUnit.BYTES_PER_SECOND;
 import static org.apache.cassandra.config.DataRateSpec.DataRateUnit.MEBIBYTES_PER_SECOND;
 import static org.apache.cassandra.config.DataStorageSpec.DataStorageUnit.MEBIBYTES;
+import static org.apache.cassandra.config.EncryptionOptions.ClientAuth.REQUIRED;
 import static org.apache.cassandra.io.util.FileUtils.ONE_GIB;
 import static org.apache.cassandra.io.util.FileUtils.ONE_MIB;
 import static org.apache.cassandra.utils.Clock.Global.logInitializationOutcome;
@@ -1215,8 +1216,8 @@ public class DatabaseDescriptor
 
         try
         {
-            SSLFactory.validateSslContext("Internode messaging", conf.server_encryption_options, true, true);
-            SSLFactory.validateSslContext("Native transport", conf.client_encryption_options, conf.client_encryption_options.require_client_auth, true);
+            SSLFactory.validateSslContext("Internode messaging", conf.server_encryption_options, REQUIRED, true);
+            SSLFactory.validateSslContext("Native transport", conf.client_encryption_options, conf.client_encryption_options.getClientAuth(), true);
             SSLFactory.initHotReloading(conf.server_encryption_options, conf.client_encryption_options, false);
         }
         catch (IOException e)

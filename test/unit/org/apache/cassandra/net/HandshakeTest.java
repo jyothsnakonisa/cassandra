@@ -48,6 +48,8 @@ import org.junit.Test;
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.Future;
 
+import static org.apache.cassandra.config.EncryptionOptions.ClientAuth.NOT_REQUIRED;
+import static org.apache.cassandra.config.EncryptionOptions.ClientAuth.REQUIRED;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.MessagingService.minimum_version;
 import static org.apache.cassandra.net.ConnectionType.SMALL_MESSAGES;
@@ -283,12 +285,12 @@ public class HandshakeTest
         if (sslConnectionType == SslFallbackConnectionType.MTLS)
         {
             serverEncryptionOptions = serverEncryptionOptions.withInternodeEncryption(ServerEncryptionOptions.InternodeEncryption.all)
-                                                             .withRequireClientAuth(true);
+                                                             .withRequireClientAuth(REQUIRED);
         }
         else if (sslConnectionType == SslFallbackConnectionType.SSL)
         {
             serverEncryptionOptions = serverEncryptionOptions.withInternodeEncryption(ServerEncryptionOptions.InternodeEncryption.all)
-                                                             .withRequireClientAuth(false);
+                                                             .withRequireClientAuth(NOT_REQUIRED);
         }
         return serverEncryptionOptions;
     }
